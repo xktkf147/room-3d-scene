@@ -39,13 +39,22 @@
   #trap dl{margin:0}
   code{background:#1e293b;padding:1px 5px;border-radius:4px;color:#fbbf24;font-size:11.5px}
   .dim{color:#64748b}
+  #cmp{margin-top:6px;border-collapse:collapse;font-size:11.5px;display:none}
+  #cmp.show{display:table}
+  #cmp th,#cmp td{padding:1px 6px;text-align:right;border-bottom:1px solid #1e293b}
+  #cmp th:first-child,#cmp td:first-child{text-align:left}
+  #cmp tr.cur td{color:#7dd3fc}
+  #drop{position:fixed;inset:12px;border:2px dashed #0ea5e9;border-radius:16px;
+    background:rgba(3,105,161,.18);display:none;align-items:center;justify-content:center;
+    font-size:18px;color:#e0f2fe;pointer-events:none}
+  #drop.show{display:flex}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
 <div class="panel" id="hud">
-  <h1>내 방을 알갱이로</h1>
+  <h1>욕실 받침의자를 알갱이로</h1>
   <ul id="steps">
     <li id="s1">three.js 와 Spark 불러오기</li>
     <li id="s2">SparkRenderer 를 장면에 넣기</li>
@@ -54,7 +63,10 @@
     <li id="s5">크기를 재서 카메라 놓기</li>
   </ul>
   <div id="fix"></div>
+  <div class="dim" style="margin-top:8px">.sog .ply .compressed.ply .spz .splat 파일을 화면에 끌어다 놓으면 바꿔 보며 비교합니다</div>
+  <table id="cmp"><thead><tr><th>파일</th><th>MB</th><th>알갱이</th><th>풀기</th></tr></thead><tbody></tbody></table>
 </div>
+<div id="drop">여기에 놓으면 이 파일로 바꿉니다</div>
 
 <div class="panel" id="ctl">
   <div><button id="fit">화면에 맞추기</button><button id="flip">위아래 뒤집기</button></div>
@@ -75,7 +87,7 @@
       지금 당장 확인하려면 위쪽 <b>위아래 뒤집기</b> 를 눌러 보십시오.</dd>
     <dt>알갱이 개수는 나오는데 화면에 아무것도 없다</dt>
     <dd>알갱이 덩어리는 일반 메시가 아니라서 <code>Box3.setFromObject</code> 가 빈 상자를
-      돌려줍니다. 카메라가 엉뚱한 곳을 보고 있는 것입니다. Spark 2.1 의
+      돌려줍니다. 카메라가 엉뚱한 곳을 보고 있는 것입니다. Spark 의
       <code>mesh.getBoundingBox()</code> 로 재야 합니다. 이 페이지는 그렇게 하고,
       그것마저 실패하면 손으로 놓습니다.</dd>
     <dt>파일을 못 받는다</dt>
@@ -90,7 +102,7 @@
 {"imports":{
   "three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
   "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
-  "@sparkjsdev/spark":"https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.1.0/dist/spark.module.js"
+  "@sparkjsdev/spark":"https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.4.0/dist/spark.module.js"
 }}
 </script>
 <script type="module">
@@ -180,20 +192,43 @@ try {
 }
 
 /* 확장자와 Spark 안쪽 이름이 다릅니다. .sog 는 "pcsogszip" 입니다.
-   그냥 "sog" 를 넘기면 Invalid file type 으로 걸립니다. */
+   그냥 "sog" 를 넘기면 Invalid file type 으로 걸립니다.
+   .compressed.ply 는 확장자가 ply 이고 Spark 도 "ply" 로 읽습니다(안쪽에서 압축판을 알아봅니다). */
 const TYPE_OF = { ply: "ply", spz: "spz", splat: "splat", ksplat: "ksplat",
                   sog: "pcsogszip", rad: "rad" };
 
-mark("s4", "run");
-try {
-  const ext = SPLAT_FILE.split(".").pop().toLowerCase();
+async function showSplat(bytes, name) {
+  const ext = name.split(".").pop().toLowerCase();
   const fileType = TYPE_OF[ext];
   if (!fileType) throw new Error(`Spark 이 모르는 확장자입니다: .${ext}`);
-  mesh = new SPARK.SplatMesh({ fileBytes: new Uint8Array(buf), fileType });
+  const t0 = performance.now();
+  const next = new SPARK.SplatMesh({ fileBytes: new Uint8Array(bytes), fileType });
+  await next.initialized;
+  const n = next.packedSplats?.numSplats ?? 0;
+  if (!n) { next.dispose?.(); throw new Error("알갱이가 0개입니다"); }
+  if (mesh) { scene.remove(mesh); mesh.dispose?.(); }
+  mesh = next;
   scene.add(mesh);
-  await mesh.initialized;
-  const n = mesh.packedSplats?.numSplats ?? 0;
-  if (!n) throw new Error("알갱이가 0개입니다");
+  if (FLIP_YZ) doFlip(true);
+  addRow(name, bytes.byteLength, n, performance.now() - t0);
+  return n;
+}
+
+// 끌어다 놓은 파일마다 한 줄씩 남깁니다. 같은 장면이면 알갱이 개수가 같아야 합니다.
+function addRow(name, size, n, ms) {
+  const tb = el("cmp").querySelector("tbody");
+  tb.querySelectorAll("tr").forEach(r => r.classList.remove("cur"));
+  const tr = document.createElement("tr"); tr.className = "cur";
+  for (const v of [name, (size / 1048576).toFixed(1), n.toLocaleString("ko-KR"), (ms / 1000).toFixed(1) + "초"]) {
+    const td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
+  }
+  tb.appendChild(tr);
+  el("cmp").classList.add("show");
+}
+
+mark("s4", "run");
+try {
+  const n = await showSplat(buf, SPLAT_FILE);
   mark("s4", "ok");
   el("s4").textContent = `알갱이 ${n.toLocaleString("ko-KR")}개`;
 } catch (e) {
@@ -204,7 +239,25 @@ try {
   throw e;
 }
 
-if (FLIP_YZ) doFlip(true);
+// 파일을 끌어다 놓으면 그 파일로 바꿉니다. 서버에 올리지 않고 브라우저 안에서만 엽니다.
+let dragDepth = 0;
+addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; el("drop").classList.add("show"); });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; el("drop").classList.remove("show"); } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", async e => {
+  e.preventDefault(); dragDepth = 0; el("drop").classList.remove("show");
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  mark("s4", "run"); el("s4").textContent = `${file.name} 푸는 중`;
+  try {
+    const n = await showSplat(await file.arrayBuffer(), file.name);
+    mark("s4", "ok");
+    el("s4").textContent = `${file.name} 알갱이 ${n.toLocaleString("ko-KR")}개`;
+  } catch (err) {
+    mark("s4", "bad");
+    fail(`"${file.name}" 를 못 풀었습니다. ` + (err?.message ?? String(err)));
+  }
+});
 
 /* 함정 3. 알갱이 덩어리는 일반 메시가 아니라 three 가 크기를 못 잽니다.
    Box3.setFromObject 는 빈 상자를 돌려줍니다. Spark 가 주는 자를 씁니다. */
