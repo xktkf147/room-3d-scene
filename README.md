@@ -1,3 +1,5 @@
+**3D 뷰어 바로 보기: [https://xktkf147.github.io/room-3d-scene/](https://xktkf147.github.io/room-3d-scene/)**
+
 # 욕실 받침의자를 알갱이로
 
 폰으로 찍은 영상 하나를 MapAnything 으로 복원해 가우시안 스플랫으로 바꾸고, three.js 와 Spark 로 브라우저에 띄웠습니다.
